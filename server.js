@@ -83,6 +83,21 @@ function addResourceRoutes(resource, definition) {
       res.status(500).json({ success: false, message: `Failed to create ${resource}` });
     }
   });
+
+  app.delete(`/api/${resource}/:id`, async (req, res) => {
+    try {
+      const [result] = await pool.query(`DELETE FROM ${definition.table} WHERE id = ?`, [req.params.id]);
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: `${resource} record not found` });
+      }
+
+      res.json({ success: true, message: `${resource} record deleted` });
+    } catch (error) {
+      console.error(`Failed to delete ${resource}:`, error.message);
+      res.status(500).json({ success: false, message: `Failed to delete ${resource}` });
+    }
+  });
 }
 
 Object.entries(resourceDefinitions).forEach(([resource, definition]) => {
