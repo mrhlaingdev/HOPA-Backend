@@ -3,9 +3,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
+const adminOnly = [authenticateToken, authorizeRoles('ADMIN')];
 
 app.use(cors());
 app.use(express.json());
@@ -60,7 +62,7 @@ function addResourceRoutes(resource, definition) {
   });
 
   // POST: Data အသစ်ထည့်ခြင်း
-  app.post(`/api/${resource}`, async (req, res) => {
+  app.post(`/api/${resource}`, ...adminOnly, async (req, res) => {
     const missingFields = definition.required.filter(
       (field) => req.body[field] === undefined || req.body[field] === null || req.body[field] === '',
     );
@@ -95,7 +97,7 @@ function addResourceRoutes(resource, definition) {
   });
 
   // PUT: Data ပြင်ဆင်ခြင်း
-  app.put(`/api/${resource}/:id`, async (req, res) => {
+  app.put(`/api/${resource}/:id`, ...adminOnly, async (req, res) => {
     const recordId = Number(req.params.id);
 
     // ID မမှန်ပါက တားမြစ်မည်
@@ -137,7 +139,7 @@ function addResourceRoutes(resource, definition) {
   });
 
   // DELETE: Data ဖျက်ခြင်း
-  app.delete(`/api/${resource}/:id`, async (req, res) => {
+  app.delete(`/api/${resource}/:id`, ...adminOnly, async (req, res) => {
     try {
       const [result] = await pool.query(`DELETE FROM ${definition.table} WHERE id = ?`, [req.params.id]);
 
@@ -167,6 +169,10 @@ app.get('/api/test', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+}
+
+module.exports = { app, pool };
