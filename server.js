@@ -98,21 +98,22 @@ function addResourceRoutes(resource, definition) {
 
     if (resource === 'courses') {
       console.log("UPDATE COURSE PAYLOAD:", req.body);
-      const { title, name, course_name, date, time, instructor } = req.body;
-      const finalTitle = title || name || course_name || '';
-      const finalDate = date || '';
-      const finalTime = time || '';
-      const finalInstructor = instructor || '';
+      const title = String(req.body.title || req.body.name || '');
+      const date = String(req.body.date || '');
+      const time = String(req.body.time || '');
+      const instructor = String(req.body.instructor || '');
       const courseId = req.params.id;
 
       query = 'UPDATE courses SET title = ?, date = ?, time = ?, instructor = ? WHERE id = ?';
-      values = [finalTitle, finalDate, finalTime, finalInstructor, courseId];
+      values = [title, date, time, instructor, courseId];
     } else {
       values = definition.fields.map((field) => (
         definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
       ));
     }
-    values.push(req.params.id);
+    if (resource !== 'courses') {
+      values.push(req.params.id);
+    }
 
     try {
       const [result] = await pool.query(
