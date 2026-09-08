@@ -46,10 +46,11 @@ const resourceDefinitions = {
 };
 
 function addResourceRoutes(resource, definition) {
+  // GET: id ပါအောင် SELECT ထုတ်ပေးထားပါသည်
   app.get(`/api/${resource}`, async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
+        `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
       );
       res.json(rows);
     } catch (error) {
@@ -58,6 +59,7 @@ function addResourceRoutes(resource, definition) {
     }
   });
 
+  // POST: Data အသစ်ထည့်ခြင်း
   app.post(`/api/${resource}`, async (req, res) => {
     const missingFields = definition.required.filter(
       (field) => req.body[field] === undefined || req.body[field] === null || req.body[field] === '',
@@ -92,55 +94,49 @@ function addResourceRoutes(resource, definition) {
     }
   });
 
+  // PUT: Data ပြင်ဆင်ခြင်း
   app.put(`/api/${resource}/:id`, async (req, res) => {
+    const recordId = Number(req.params.id);
+
+    // ID မမှန်ပါက တားမြစ်မည်
+    if (!recordId || isNaN(recordId)) {
+      return res.status(400).json({ error: "Invalid record ID provided" });
+    }
+
     let query;
     let values;
 
     if (resource === 'courses') {
-      console.log("UPDATE COURSE PAYLOAD:", req.body);
       const title = String(req.body.title || req.body.name || '');
       const date = String(req.body.date || '');
       const time = String(req.body.time || '');
       const instructor = String(req.body.instructor || '');
-      const courseId = req.params.id;
 
       query = 'UPDATE courses SET title = ?, date = ?, time = ?, instructor = ? WHERE id = ?';
-      values = [title, date, time, instructor, courseId];
+      values = [title, date, time, instructor, recordId];
     } else {
       values = definition.fields.map((field) => (
         definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
       ));
-    }
-    if (resource !== 'courses') {
-      values.push(req.params.id);
+      values.push(recordId);
+      query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
     }
 
     try {
-      const [result] = await pool.query(
-        query || `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`,
-        values,
-      );
-
-      if (resource === 'courses') {
-        return res.status(200).json({ message: "Course updated successfully", id: req.params.id });
-      }
+      const [result] = await pool.query(query, values);
 
       if (result.affectedRows === 0) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
-      res.status(200).json({ success: true, message: `${resource} record updated` });
+      res.status(200).json({ success: true, message: `${resource} record updated`, id: recordId });
     } catch (error) {
-      if (resource === 'courses') {
-        console.error("SQL UPDATE ERROR:", error);
-        return res.status(500).json({ error: error.message });
-      }
-
       console.error(`Failed to update ${resource}:`, error.message);
-      res.status(500).json({ success: false, message: `Failed to update ${resource}` });
+      res.status(500).json({ error: error.message });
     }
   });
 
+  // DELETE: Data ဖျက်ခြင်း
   app.delete(`/api/${resource}/:id`, async (req, res) => {
     try {
       const [result] = await pool.query(`DELETE FROM ${definition.table} WHERE id = ?`, [req.params.id]);
