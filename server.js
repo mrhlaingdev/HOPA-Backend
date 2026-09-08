@@ -97,13 +97,16 @@ function addResourceRoutes(resource, definition) {
     let values;
 
     if (resource === 'courses') {
-      const title = req.body.title || '';
-      const date = req.body.date || '';
-      const time = req.body.time || '';
-      const instructor = req.body.instructor || '';
+      console.log("UPDATE COURSE PAYLOAD:", req.body);
+      const { title, name, course_name, date, time, instructor } = req.body;
+      const finalTitle = title || name || course_name || '';
+      const finalDate = date || '';
+      const finalTime = time || '';
+      const finalInstructor = instructor || '';
+      const courseId = req.params.id;
 
       query = 'UPDATE courses SET title = ?, date = ?, time = ?, instructor = ? WHERE id = ?';
-      values = [title, date, time, instructor];
+      values = [finalTitle, finalDate, finalTime, finalInstructor, courseId];
     } else {
       values = definition.fields.map((field) => (
         definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
@@ -117,12 +120,21 @@ function addResourceRoutes(resource, definition) {
         values,
       );
 
+      if (resource === 'courses') {
+        return res.status(200).json({ message: "Course updated successfully", id: req.params.id });
+      }
+
       if (result.affectedRows === 0) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
       res.status(200).json({ success: true, message: `${resource} record updated` });
     } catch (error) {
+      if (resource === 'courses') {
+        console.error("SQL UPDATE ERROR:", error);
+        return res.status(500).json({ error: error.message });
+      }
+
       console.error(`Failed to update ${resource}:`, error.message);
       res.status(500).json({ success: false, message: `Failed to update ${resource}` });
     }
