@@ -93,14 +93,27 @@ function addResourceRoutes(resource, definition) {
   });
 
   app.put(`/api/${resource}/:id`, async (req, res) => {
-    const values = definition.fields.map((field) => (
-      definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
-    ));
+    let query;
+    let values;
+
+    if (resource === 'courses') {
+      const title = req.body.title || '';
+      const date = req.body.date || '';
+      const time = req.body.time || '';
+      const instructor = req.body.instructor || '';
+
+      query = 'UPDATE courses SET title = ?, date = ?, time = ?, instructor = ? WHERE id = ?';
+      values = [title, date, time, instructor];
+    } else {
+      values = definition.fields.map((field) => (
+        definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
+      ));
+    }
     values.push(req.params.id);
 
     try {
       const [result] = await pool.query(
-        `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`,
+        query || `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`,
         values,
       );
 
@@ -108,7 +121,7 @@ function addResourceRoutes(resource, definition) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
-      res.json({ success: true, message: `${resource} record updated` });
+      res.status(200).json({ success: true, message: `${resource} record updated` });
     } catch (error) {
       console.error(`Failed to update ${resource}:`, error.message);
       res.status(500).json({ success: false, message: `Failed to update ${resource}` });
