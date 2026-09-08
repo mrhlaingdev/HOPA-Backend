@@ -29,8 +29,8 @@ const resourceDefinitions = {
   },
   courses: {
     table: 'courses',
-    fields: ['title', 'completion_rate'],
-    required: ['title'],
+    fields: ['title', 'date', 'time', 'instructor'],
+    required: ['title', 'date', 'time', 'instructor'],
   },
   attendance: {
     table: 'attendance',
