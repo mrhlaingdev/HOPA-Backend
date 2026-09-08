@@ -30,7 +30,8 @@ const resourceDefinitions = {
   courses: {
     table: 'courses',
     fields: ['title', 'date', 'time', 'instructor'],
-    required: ['title', 'date', 'time', 'instructor'],
+    required: [],
+    defaultMissingFields: true,
   },
   attendance: {
     table: 'attendance',
@@ -67,8 +68,10 @@ function addResourceRoutes(resource, definition) {
       });
     }
 
-    const fields = definition.fields.filter((field) => req.body[field] !== undefined);
-    const values = fields.map((field) => req.body[field]);
+    const fields = definition.defaultMissingFields
+      ? definition.fields
+      : definition.fields.filter((field) => req.body[field] !== undefined);
+    const values = fields.map((field) => definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]);
     const placeholders = fields.map(() => '?').join(', ');
 
     try {
@@ -85,7 +88,9 @@ function addResourceRoutes(resource, definition) {
   });
 
   app.put(`/api/${resource}/:id`, async (req, res) => {
-    const values = definition.fields.map((field) => req.body[field]);
+    const values = definition.fields.map((field) => (
+      definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
+    ));
     values.push(req.params.id);
 
     try {
