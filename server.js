@@ -35,20 +35,22 @@ const resourceDefinitions = {
   },
   attendance: {
     table: 'attendance',
-    fields: ['student_id', 'date', 'status'],
-    required: ['student_id', 'date'],
+    fields: ['student_name', 'date', 'status', 'remarks'],
+    required: ['student_name', 'date'],
   },
   finance: {
     table: 'finance',
-    fields: ['type', 'amount', 'category', 'description', 'date'],
-    required: ['type', 'amount', 'category', 'date'],
+    fields: ['title', 'amount', 'type', 'date', 'category'],
+    required: ['title', 'amount', 'type', 'date'],
   },
 };
 
 function addResourceRoutes(resource, definition) {
   app.get(`/api/${resource}`, async (req, res) => {
     try {
-      const [rows] = await pool.query(`SELECT * FROM ${definition.table} ORDER BY id DESC`);
+      const [rows] = await pool.query(
+        `SELECT ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
+      );
       res.json(rows);
     } catch (error) {
       console.error(`Failed to fetch ${resource}:`, error.message);
@@ -79,7 +81,10 @@ function addResourceRoutes(resource, definition) {
         `INSERT INTO ${definition.table} (${fields.join(', ')}) VALUES (${placeholders})`,
         values,
       );
-      const [rows] = await pool.query(`SELECT * FROM ${definition.table} WHERE id = ?`, [result.insertId]);
+      const [rows] = await pool.query(
+        `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} WHERE id = ?`,
+        [result.insertId],
+      );
       res.status(201).json(rows[0]);
     } catch (error) {
       console.error(`Failed to create ${resource}:`, error.message);
