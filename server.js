@@ -21,6 +21,74 @@ const pool = mysql.createPool({
   },
 });
 
+const resourceDefinitions = {
+  students: {
+    table: 'students',
+    fields: ['name', 'age', 'grade', 'parent_phone', 'address', 'status'],
+    required: ['name', 'age', 'grade'],
+  },
+  courses: {
+    table: 'courses',
+    fields: ['title', 'completion_rate'],
+    required: ['title'],
+  },
+  attendance: {
+    table: 'attendance',
+    fields: ['student_id', 'date', 'status'],
+    required: ['student_id', 'date'],
+  },
+  finance: {
+    table: 'finance',
+    fields: ['type', 'amount', 'category', 'description', 'date'],
+    required: ['type', 'amount', 'category', 'date'],
+  },
+};
+
+function addResourceRoutes(resource, definition) {
+  app.get(`/api/${resource}`, async (req, res) => {
+    try {
+      const [rows] = await pool.query(`SELECT * FROM ${definition.table} ORDER BY id DESC`);
+      res.json(rows);
+    } catch (error) {
+      console.error(`Failed to fetch ${resource}:`, error.message);
+      res.status(500).json({ success: false, message: `Failed to fetch ${resource}` });
+    }
+  });
+
+  app.post(`/api/${resource}`, async (req, res) => {
+    const missingFields = definition.required.filter(
+      (field) => req.body[field] === undefined || req.body[field] === null || req.body[field] === '',
+    );
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required field(s): ${missingFields.join(', ')}`,
+      });
+    }
+
+    const fields = definition.fields.filter((field) => req.body[field] !== undefined);
+    const values = fields.map((field) => req.body[field]);
+    const placeholders = fields.map(() => '?').join(', ');
+
+    try {
+      const [result] = await pool.query(
+        `INSERT INTO ${definition.table} (${fields.join(', ')}) VALUES (${placeholders})`,
+        values,
+      );
+      const [rows] = await pool.query(`SELECT * FROM ${definition.table} WHERE id = ?`, [result.insertId]);
+      res.status(201).json(rows[0]);
+    } catch (error) {
+      console.error(`Failed to create ${resource}:`, error.message);
+      res.status(500).json({ success: false, message: `Failed to create ${resource}` });
+    }
+  });
+}
+
+Object.entries(resourceDefinitions).forEach(([resource, definition]) => {
+  addResourceRoutes(resource, definition);
+});
+
 app.get('/api/test', async (req, res) => {
   try {
     await pool.query('SELECT 1');
