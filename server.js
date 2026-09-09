@@ -9,8 +9,17 @@ const { createAuditLogger } = require('./middleware/auditLogger');
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const adminOnly = [authenticateToken, authorizeRoles('ADMIN')];
+const corsOptions = {
+  origin: [
+    'https://hopa-frontend.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ],
+  credentials: true,
+};
 
-app.use(cors());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json());
 
 const pool = mysql.createPool({
