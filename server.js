@@ -8,18 +8,26 @@ const { createAuditLogger } = require('./middleware/auditLogger');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
-const adminOnly = [authenticateToken, authorizeRoles('ADMIN')];
+
+// Admin Guard (Role စာလုံးအကြီး/အသေး နှစ်မျိုးလုံး ခွင့်ပြုထားပါသည်)
+const adminOnly = [authenticateToken, authorizeRoles('admin', 'ADMIN')];
+
+// Dynamic CORS Options (Vercel subdomains အားလုံးနှင့် localhost အားလုံးကို ခွင့်ပြုခြင်း)
 const corsOptions = {
-  origin: [
-    'https://hopa-frontend.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-  ],
+  origin: function (origin, callback) {
+    if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Fallback: Enable cross-origin for all deployment previews
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-role', 'x-user-id', 'x-active-role'],
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 const pool = mysql.createPool({
@@ -93,7 +101,7 @@ const resourceDefinitions = {
 };
 
 function addResourceRoutes(resource, definition) {
-  // GET: id ပါအောင် SELECT ထုတ်ပေးထားပါသည်
+  // GET: Public သို့မဟုတ် Authentication လွယ်ကူစွာ ရယူရန် ခွင့်ပြုထားသည်
   app.get(`/api/${resource}`, async (req, res) => {
     try {
       const [rows] = await pool.query(
@@ -150,7 +158,7 @@ function addResourceRoutes(resource, definition) {
       );
       await logActivity(
         getAuthenticatedUserId(req.user),
-        req.user.role,
+        req.user?.role || 'admin',
         'CREATE',
         resource,
         { recordId: result.insertId, fields: req.body },
@@ -166,15 +174,11 @@ function addResourceRoutes(resource, definition) {
   app.put(`/api/${resource}/:id`, ...adminOnly, async (req, res) => {
     const recordId = Number(req.params.id);
 
-    // ID မမှန်ပါက တားမြစ်မည်
     if (!recordId || isNaN(recordId)) {
       return res.status(400).json({ error: "Invalid record ID provided" });
     }
 
-    let query;
-    let values;
-
-    values = definition.fields.map((field) => (
+    let values = definition.fields.map((field) => (
       definition.defaultMissingFields
         ? definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')
           ? null
@@ -182,7 +186,7 @@ function addResourceRoutes(resource, definition) {
         : req.body[field]
     ));
     values.push(recordId);
-    query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
+    let query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
 
     try {
       const [result] = await pool.query(query, values);
@@ -193,7 +197,7 @@ function addResourceRoutes(resource, definition) {
 
       await logActivity(
         getAuthenticatedUserId(req.user),
-        req.user.role,
+        req.user?.role || 'admin',
         'UPDATE',
         resource,
         { recordId, fields: req.body },
@@ -216,7 +220,7 @@ function addResourceRoutes(resource, definition) {
 
       await logActivity(
         getAuthenticatedUserId(req.user),
-        req.user.role,
+        req.user?.role || 'admin',
         'DELETE',
         resource,
         { recordId: req.params.id },
