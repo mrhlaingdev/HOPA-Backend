@@ -19,20 +19,22 @@ function isHeaderAuthEnabled() {
 
 function authenticateToken(req, res, next) {
   const token = getToken(req);
+  const headerRole = req.headers['x-user-role'] || req.headers['x-active-role'];
 
   if (token) {
     try {
       req.user = jwt.verify(token, process.env.JWT_SECRET);
       return next();
     } catch (error) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired authentication token',
-      });
+      if (!isHeaderAuthEnabled() || !headerRole) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired authentication token',
+        });
+      }
     }
   }
 
-  const headerRole = req.headers['x-user-role'] || req.headers['x-active-role'];
   if (isHeaderAuthEnabled() && headerRole) {
     req.user = {
       id: req.headers['x-user-id'] || null,
