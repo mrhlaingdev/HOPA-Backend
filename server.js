@@ -72,7 +72,7 @@ const resourceDefinitions = {
   },
   teachers: {
     table: 'teachers',
-    fields: ['name', 'phone', 'email', 'specialty'],
+    fields: ['name', 'phone', 'email', 'specialization'],
     required: ['name'],
   },
   staff: {
