@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
+const { createAuditLogger } = require('./middleware/auditLogger');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -22,6 +23,25 @@ const pool = mysql.createPool({
     rejectUnauthorized: false,
   },
 });
+const logActivity = createAuditLogger(pool);
+
+async function ensureAuditLogsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id VARCHAR(255),
+      user_role VARCHAR(100),
+      action VARCHAR(100) NOT NULL,
+      resource VARCHAR(100) NOT NULL,
+      details TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+function getAuthenticatedUserId(user) {
+  return user?.id ?? user?.user_id ?? user?.userId ?? null;
+}
 
 const resourceDefinitions = {
   students: {
@@ -89,6 +109,13 @@ function addResourceRoutes(resource, definition) {
         `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} WHERE id = ?`,
         [result.insertId],
       );
+      await logActivity(
+        getAuthenticatedUserId(req.user),
+        req.user.role,
+        'CREATE',
+        resource,
+        { recordId: result.insertId, fields: req.body },
+      );
       res.status(201).json(rows[0]);
     } catch (error) {
       console.error(`Failed to create ${resource}:`, error.message);
@@ -131,6 +158,13 @@ function addResourceRoutes(resource, definition) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
+      await logActivity(
+        getAuthenticatedUserId(req.user),
+        req.user.role,
+        'UPDATE',
+        resource,
+        { recordId, fields: req.body },
+      );
       res.status(200).json({ success: true, message: `${resource} record updated`, id: recordId });
     } catch (error) {
       console.error(`Failed to update ${resource}:`, error.message);
@@ -147,6 +181,13 @@ function addResourceRoutes(resource, definition) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
+      await logActivity(
+        getAuthenticatedUserId(req.user),
+        req.user.role,
+        'DELETE',
+        resource,
+        { recordId: req.params.id },
+      );
       res.json({ success: true, message: `${resource} record deleted` });
     } catch (error) {
       console.error(`Failed to delete ${resource}:`, error.message);
@@ -157,6 +198,33 @@ function addResourceRoutes(resource, definition) {
 
 Object.entries(resourceDefinitions).forEach(([resource, definition]) => {
   addResourceRoutes(resource, definition);
+});
+
+app.get('/api/audit-logs', ...adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, user_id, user_role, action, resource, details, created_at
+      FROM audit_logs
+      ORDER BY created_at DESC, id DESC
+      LIMIT 100
+    `);
+
+    res.json(rows.map((row) => ({
+      ...row,
+      details: row.details
+        ? (() => {
+          try {
+            return JSON.parse(row.details);
+          } catch (error) {
+            return row.details;
+          }
+        })()
+        : null,
+    })));
+  } catch (error) {
+    console.error('Failed to fetch audit logs:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch audit logs' });
+  }
 });
 
 app.get('/api/test', async (req, res) => {
@@ -170,9 +238,16 @@ app.get('/api/test', async (req, res) => {
 });
 
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-  });
+  ensureAuditLogsTable()
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`Server listening on port ${port}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to initialize audit logs table:', error.message);
+      process.exitCode = 1;
+    });
 }
 
 module.exports = { app, pool };
