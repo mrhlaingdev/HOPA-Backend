@@ -262,16 +262,13 @@ app.get('/api/test', async (req, res) => {
 });
 
 if (require.main === module) {
-  ensureAuditLogsTable()
-    .then(() => {
-      app.listen(port, () => {
-        console.log(`Server listening on port ${port}`);
-      });
-    })
-    .catch((error) => {
-      console.error('Failed to initialize audit logs table:', error.message);
-      process.exitCode = 1;
-    });
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+
+  ensureAuditLogsTable().catch((error) => {
+    console.error('Failed to initialize audit logs table:', error.message);
+  });
 }
 
 module.exports = { app, pool };
