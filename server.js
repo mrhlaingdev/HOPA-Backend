@@ -51,9 +51,25 @@ const resourceDefinitions = {
   },
   courses: {
     table: 'courses',
-    fields: ['title', 'date', 'time', 'instructor'],
+    fields: ['title', 'date', 'time', 'teacher_id'],
     required: [],
     defaultMissingFields: true,
+    nullableFields: ['teacher_id'],
+    select: `
+      SELECT c.id, c.title, c.date, c.time, c.teacher_id, t.name AS teacher_name
+      FROM courses c
+      LEFT JOIN teachers t ON t.id = c.teacher_id
+    `,
+  },
+  teachers: {
+    table: 'teachers',
+    fields: ['name', 'email', 'phone', 'subject', 'status'],
+    required: ['name'],
+  },
+  staff: {
+    table: 'staff',
+    fields: ['name', 'email', 'phone', 'role', 'status'],
+    required: ['name'],
   },
   attendance: {
     table: 'attendance',
@@ -72,7 +88,9 @@ function addResourceRoutes(resource, definition) {
   app.get(`/api/${resource}`, async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
+        definition.select
+          ? `${definition.select} ORDER BY c.id DESC`
+          : `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
       );
       res.json(rows);
     } catch (error) {
@@ -97,7 +115,17 @@ function addResourceRoutes(resource, definition) {
     const fields = definition.defaultMissingFields
       ? definition.fields
       : definition.fields.filter((field) => req.body[field] !== undefined);
-    const values = fields.map((field) => definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]);
+    const values = fields.map((field) => {
+      if (!definition.defaultMissingFields) {
+        return req.body[field];
+      }
+
+      if (definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')) {
+        return null;
+      }
+
+      return req.body[field] ?? '';
+    });
     const placeholders = fields.map(() => '?').join(', ');
 
     try {
@@ -106,7 +134,9 @@ function addResourceRoutes(resource, definition) {
         values,
       );
       const [rows] = await pool.query(
-        `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} WHERE id = ?`,
+        definition.select
+          ? `${definition.select} WHERE c.id = ?`
+          : `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} WHERE id = ?`,
         [result.insertId],
       );
       await logActivity(
@@ -135,21 +165,15 @@ function addResourceRoutes(resource, definition) {
     let query;
     let values;
 
-    if (resource === 'courses') {
-      const title = String(req.body.title || req.body.name || '');
-      const date = String(req.body.date || '');
-      const time = String(req.body.time || '');
-      const instructor = String(req.body.instructor || '');
-
-      query = 'UPDATE courses SET title = ?, date = ?, time = ?, instructor = ? WHERE id = ?';
-      values = [title, date, time, instructor, recordId];
-    } else {
-      values = definition.fields.map((field) => (
-        definition.defaultMissingFields ? req.body[field] ?? '' : req.body[field]
-      ));
-      values.push(recordId);
-      query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
-    }
+    values = definition.fields.map((field) => (
+      definition.defaultMissingFields
+        ? definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')
+          ? null
+          : req.body[field] ?? ''
+        : req.body[field]
+    ));
+    values.push(recordId);
+    query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
 
     try {
       const [result] = await pool.query(query, values);
