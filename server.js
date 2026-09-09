@@ -72,12 +72,12 @@ const resourceDefinitions = {
   },
   teachers: {
     table: 'teachers',
-    fields: ['name', 'email', 'phone', 'subject', 'status'],
+    fields: ['name', 'phone', 'email', 'specialization'],
     required: ['name'],
   },
   staff: {
     table: 'staff',
-    fields: ['name', 'email', 'phone', 'role', 'status'],
+    fields: ['name', 'phone', 'position', 'salary'],
     required: ['name'],
   },
   attendance: {
