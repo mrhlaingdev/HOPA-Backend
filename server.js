@@ -233,6 +233,52 @@ function addResourceRoutes(resource, definition) {
   });
 }
 
+// Attendance အတွက် သီးခြား Upsert Route (student_name + date နဲ့ ရှာပြီး
+// ရှိပြီးသားဆိုရင် update, မရှိသေးရင် အသစ်ဖန်တီးပါတယ်)
+// ဒီ route ကို generic PUT /api/attendance/:id route မတိုင်ခင် ထားထားပါတယ်
+app.put('/api/attendance', ...adminOnly, async (req, res) => {
+  const { student_name, date, status, remarks } = req.body;
+
+  if (!student_name || !date) {
+    return res.status(400).json({
+      success: false,
+      message: 'student_name and date are required',
+    });
+  }
+
+  try {
+    const [existing] = await pool.query(
+      'SELECT id FROM attendance WHERE student_name = ? AND date = ?',
+      [student_name, date],
+    );
+
+    if (existing.length > 0) {
+      await pool.query(
+        'UPDATE attendance SET status = ?, remarks = ? WHERE id = ?',
+        [status ?? null, remarks ?? null, existing[0].id],
+      );
+    } else {
+      await pool.query(
+        'INSERT INTO attendance (student_name, date, status, remarks) VALUES (?, ?, ?, ?)',
+        [student_name, date, status ?? null, remarks ?? null],
+      );
+    }
+
+    await logActivity(
+      getAuthenticatedUserId(req.user),
+      req.user?.role || 'admin',
+      'UPDATE',
+      'attendance',
+      { student_name, date, status },
+    );
+
+    res.status(200).json({ success: true, message: 'Attendance updated' });
+  } catch (error) {
+    console.error('Failed to update attendance:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to update attendance' });
+  }
+});
+
 Object.entries(resourceDefinitions).forEach(([resource, definition]) => {
   addResourceRoutes(resource, definition);
 });
