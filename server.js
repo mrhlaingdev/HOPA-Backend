@@ -68,12 +68,12 @@ const resourceDefinitions = {
   },
   courses: {
     table: 'courses',
-    fields: ['title', 'date', 'time', 'teacher_id'],
+    fields: ['title', 'date', 'time', 'instructor', 'teacher_id'],
     required: [],
     defaultMissingFields: true,
     nullableFields: ['teacher_id'],
     select: `
-      SELECT c.id, c.title, c.date, c.time, c.teacher_id, t.name AS teacher_name
+      SELECT c.id, c.title, c.date, c.time, c.instructor, c.teacher_id, t.name AS teacher_name
       FROM courses c
       LEFT JOIN teachers t ON t.id = c.teacher_id
     `,
