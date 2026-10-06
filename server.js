@@ -56,6 +56,27 @@ async function ensureAuditLogsTable() {
   `);
 }
 
+async function ensureGenderColumns() {
+  for (const table of ['students', 'teachers', 'staff']) {
+    const [columns] = await pool.query(`SHOW COLUMNS FROM ${table} LIKE 'gender'`);
+
+    if (columns.length === 0) {
+      await pool.query(
+        `ALTER TABLE ${table} ADD COLUMN gender VARCHAR(10) NOT NULL DEFAULT 'Male'`,
+      );
+    }
+
+    await pool.query(`
+      UPDATE ${table}
+      SET gender = CASE
+        WHEN LOWER(TRIM(gender)) = 'female' THEN 'Female'
+        ELSE 'Male'
+      END
+      WHERE gender IS NULL OR BINARY gender NOT IN ('Male', 'Female')
+    `);
+  }
+}
+
 function getAuthenticatedUserId(user) {
   return user?.id ?? user?.user_id ?? user?.userId ?? null;
 }
@@ -63,7 +84,7 @@ function getAuthenticatedUserId(user) {
 const resourceDefinitions = {
   students: {
     table: 'students',
-    fields: ['name', 'age', 'grade', 'parent_phone', 'address', 'status'],
+    fields: ['name', 'age', 'grade', 'parent_phone', 'address', 'status', 'gender'],
     required: ['name', 'age', 'grade'],
   },
   courses: {
@@ -80,12 +101,12 @@ const resourceDefinitions = {
   },
   teachers: {
     table: 'teachers',
-    fields: ['name', 'phone', 'email', 'specialization'],
+    fields: ['name', 'phone', 'email', 'specialization', 'gender'],
     required: ['name'],
   },
   staff: {
     table: 'staff',
-    fields: ['name', 'phone', 'position', 'salary'],
+    fields: ['name', 'phone', 'position', 'salary', 'gender'],
     required: ['name'],
   },
   attendance: {
@@ -118,6 +139,15 @@ function addResourceRoutes(resource, definition) {
 
   // POST: Data အသစ်ထည့်ခြင်း
   app.post(`/api/${resource}`, ...adminOnly, async (req, res) => {
+    if (definition.fields.includes('gender')
+      && req.body.gender !== undefined
+      && !['Male', 'Female'].includes(req.body.gender)) {
+      return res.status(400).json({
+        success: false,
+        message: 'gender must be Male or Female',
+      });
+    }
+
     const missingFields = definition.required.filter(
       (field) => req.body[field] === undefined || req.body[field] === null || req.body[field] === '',
     );
@@ -178,7 +208,22 @@ function addResourceRoutes(resource, definition) {
       return res.status(400).json({ error: "Invalid record ID provided" });
     }
 
-    let values = definition.fields.map((field) => (
+    if (definition.fields.includes('gender')
+      && req.body.gender !== undefined
+      && !['Male', 'Female'].includes(req.body.gender)) {
+      return res.status(400).json({
+        success: false,
+        message: 'gender must be Male or Female',
+      });
+    }
+
+    const updateFields = definition.fields.filter(
+      (field) => definition.defaultMissingFields || req.body[field] !== undefined,
+    );
+    if (updateFields.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one field is required' });
+    }
+    const values = updateFields.map((field) => (
       definition.defaultMissingFields
         ? definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')
           ? null
@@ -186,7 +231,7 @@ function addResourceRoutes(resource, definition) {
         : req.body[field]
     ));
     values.push(recordId);
-    let query = `UPDATE ${definition.table} SET ${definition.fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
+    const query = `UPDATE ${definition.table} SET ${updateFields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
 
     try {
       const [result] = await pool.query(query, values);
@@ -283,6 +328,44 @@ Object.entries(resourceDefinitions).forEach(([resource, definition]) => {
   addResourceRoutes(resource, definition);
 });
 
+const dashboardStatsHandler = async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM students) AS totalStudents,
+        (SELECT COUNT(*) FROM teachers) AS totalTeachers,
+        (SELECT COUNT(*) FROM staff) AS totalStaff,
+        (SELECT COUNT(*) FROM students WHERE gender = 'Male') AS maleStudents,
+        (SELECT COUNT(*) FROM students WHERE gender = 'Female') AS femaleStudents,
+        (SELECT COUNT(*) FROM teachers WHERE gender = 'Male') AS maleTeachers,
+        (SELECT COUNT(*) FROM teachers WHERE gender = 'Female') AS femaleTeachers,
+        (SELECT COUNT(*) FROM staff WHERE gender = 'Male') AS maleStaff,
+        (SELECT COUNT(*) FROM staff WHERE gender = 'Female') AS femaleStaff
+    `);
+
+    const stats = Object.fromEntries(
+      Object.entries(rows[0]).map(([key, value]) => [key, Number(value)]),
+    );
+    res.json({
+      totalStudents: stats.totalStudents,
+      maleStudents: stats.maleStudents,
+      femaleStudents: stats.femaleStudents,
+      totalTeachers: stats.totalTeachers,
+      maleTeachers: stats.maleTeachers,
+      femaleTeachers: stats.femaleTeachers,
+      totalMembers: stats.totalStudents + stats.totalTeachers + stats.totalStaff,
+      maleMembers: stats.maleStudents + stats.maleTeachers + stats.maleStaff,
+      femaleMembers: stats.femaleStudents + stats.femaleTeachers + stats.femaleStaff,
+    });
+  } catch (error) {
+    console.error('Failed to fetch dashboard stats:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch dashboard stats' });
+  }
+};
+
+app.get('/dashboard/stats', dashboardStatsHandler);
+app.get('/api/dashboard/stats', dashboardStatsHandler);
+
 app.get('/api/audit-logs', ...adminOnly, async (req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -321,13 +404,16 @@ app.get('/api/test', async (req, res) => {
 });
 
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-  });
-
-  ensureAuditLogsTable().catch((error) => {
-    console.error('Failed to initialize audit logs table:', error.message);
-  });
+  Promise.all([ensureAuditLogsTable(), ensureGenderColumns()])
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`Server listening on port ${port}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to initialize database schema:', error.message);
+      process.exitCode = 1;
+    });
 }
 
 module.exports = { app, pool };
