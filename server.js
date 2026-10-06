@@ -66,10 +66,16 @@ async function ensureEventsTable() {
       description TEXT,
       attendees_count INT NOT NULL DEFAULT 0,
       food_menu TEXT,
-      total_expense DECIMAL(12, 2) NOT NULL DEFAULT 0,
-      donations_collected DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      total_expense VARCHAR(255) NOT NULL DEFAULT '0',
+      donations_collected VARCHAR(255) NOT NULL DEFAULT '0',
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE events
+      MODIFY COLUMN total_expense VARCHAR(255) NOT NULL DEFAULT '0',
+      MODIFY COLUMN donations_collected VARCHAR(255) NOT NULL DEFAULT '0'
   `);
 }
 
