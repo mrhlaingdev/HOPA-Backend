@@ -56,6 +56,23 @@ async function ensureAuditLogsTable() {
   `);
 }
 
+async function ensureEventsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      date DATE NOT NULL,
+      location VARCHAR(255),
+      description TEXT,
+      attendees_count INT NOT NULL DEFAULT 0,
+      food_menu TEXT,
+      total_expense DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      donations_collected DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
 async function ensureGenderColumns() {
   for (const table of ['students', 'teachers', 'staff']) {
     const [columns] = await pool.query(`SHOW COLUMNS FROM ${table} LIKE 'gender'`);
@@ -99,6 +116,32 @@ const resourceDefinitions = {
       LEFT JOIN teachers t ON t.id = c.teacher_id
     `,
   },
+  events: {
+    table: 'events',
+    fields: [
+      'title',
+      'date',
+      'location',
+      'description',
+      'attendees_count',
+      'food_menu',
+      'total_expense',
+      'donations_collected',
+    ],
+    required: ['title', 'date'],
+    select: `
+      SELECT id, title, date, location, description, attendees_count, food_menu,
+        total_expense, donations_collected, created_at
+      FROM events
+    `,
+    selectById: `
+      SELECT id, title, date, location, description, attendees_count, food_menu,
+        total_expense, donations_collected, created_at
+      FROM events
+      WHERE id = ?
+    `,
+    orderBy: 'id DESC',
+  },
   teachers: {
     table: 'teachers',
     fields: ['name', 'phone', 'email', 'specialization', 'gender'],
@@ -127,7 +170,7 @@ function addResourceRoutes(resource, definition) {
     try {
       const [rows] = await pool.query(
         definition.select
-          ? `${definition.select} ORDER BY c.id DESC`
+          ? `${definition.select} ORDER BY ${definition.orderBy || 'c.id DESC'}`
           : `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} ORDER BY id DESC`,
       );
       res.json(rows);
@@ -181,8 +224,10 @@ function addResourceRoutes(resource, definition) {
         values,
       );
       const [rows] = await pool.query(
-        definition.select
-          ? `${definition.select} WHERE c.id = ?`
+        definition.selectById
+          ? definition.selectById
+          : definition.select
+            ? `${definition.select} WHERE c.id = ?`
           : `SELECT id, ${definition.fields.join(', ')} FROM ${definition.table} WHERE id = ?`,
         [result.insertId],
       );
@@ -404,7 +449,7 @@ app.get('/api/test', async (req, res) => {
 });
 
 if (require.main === module) {
-  Promise.all([ensureAuditLogsTable(), ensureGenderColumns()])
+  Promise.all([ensureAuditLogsTable(), ensureEventsTable(), ensureGenderColumns()])
     .then(() => {
       app.listen(port, () => {
         console.log(`Server listening on port ${port}`);
