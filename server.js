@@ -104,6 +104,43 @@ function getAuthenticatedUserId(user) {
   return user?.id ?? user?.user_id ?? user?.userId ?? null;
 }
 
+const eventResponseFields = `
+  id, title, date, location, description, attendees_count, food_menu,
+  total_expense, donations_collected, created_at
+`;
+
+function normalizeEventField(field, value) {
+  if (!['attendees_count', 'total_expense', 'donations_collected'].includes(field)) {
+    return { valid: true, value };
+  }
+
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return { valid: false };
+  }
+
+  if (field === 'attendees_count') {
+    const countString = String(value).trim();
+    if (!/^\d+$/.test(countString)) {
+      return { valid: false };
+    }
+
+    const count = Number(countString);
+    if (!Number.isSafeInteger(count) || count > 2147483647) {
+      return { valid: false };
+    }
+    return { valid: true, value: count };
+  }
+
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    return { valid: false };
+  }
+  const textValue = String(value);
+  if (Array.from(textValue).length > 255) {
+    return { valid: false };
+  }
+  return { valid: true, value: textValue };
+}
+
 const resourceDefinitions = {
   students: {
     table: 'students',
@@ -135,14 +172,13 @@ const resourceDefinitions = {
       'donations_collected',
     ],
     required: ['title', 'date'],
+    normalizeField: normalizeEventField,
     select: `
-      SELECT id, title, date, location, description, attendees_count, food_menu,
-        total_expense, donations_collected, created_at
+      SELECT ${eventResponseFields}
       FROM events
     `,
     selectById: `
-      SELECT id, title, date, location, description, attendees_count, food_menu,
-        total_expense, donations_collected, created_at
+      SELECT ${eventResponseFields}
       FROM events
       WHERE id = ?
     `,
@@ -208,12 +244,27 @@ function addResourceRoutes(resource, definition) {
       });
     }
 
+    const invalidField = definition.fields.find((field) => {
+      if (!definition.normalizeField || req.body[field] === undefined) {
+        return false;
+      }
+      return !definition.normalizeField(field, req.body[field]).valid;
+    });
+    if (invalidField) {
+      return res.status(400).json({
+        success: false,
+        message: `${invalidField} has an invalid value`,
+      });
+    }
+
     const fields = definition.defaultMissingFields
       ? definition.fields
       : definition.fields.filter((field) => req.body[field] !== undefined);
     const values = fields.map((field) => {
       if (!definition.defaultMissingFields) {
-        return req.body[field];
+        return definition.normalizeField
+          ? definition.normalizeField(field, req.body[field]).value
+          : req.body[field];
       }
 
       if (definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')) {
@@ -268,6 +319,19 @@ function addResourceRoutes(resource, definition) {
       });
     }
 
+    const invalidField = definition.fields.find((field) => {
+      if (!definition.normalizeField || req.body[field] === undefined) {
+        return false;
+      }
+      return !definition.normalizeField(field, req.body[field]).valid;
+    });
+    if (invalidField) {
+      return res.status(400).json({
+        success: false,
+        message: `${invalidField} has an invalid value`,
+      });
+    }
+
     const updateFields = definition.fields.filter(
       (field) => definition.defaultMissingFields || req.body[field] !== undefined,
     );
@@ -279,7 +343,9 @@ function addResourceRoutes(resource, definition) {
         ? definition.nullableFields?.includes(field) && (req.body[field] === undefined || req.body[field] === null || req.body[field] === '')
           ? null
           : req.body[field] ?? ''
-        : req.body[field]
+        : definition.normalizeField
+          ? definition.normalizeField(field, req.body[field]).value
+          : req.body[field]
     ));
     values.push(recordId);
     const query = `UPDATE ${definition.table} SET ${updateFields.map((field) => `${field}=?`).join(', ')} WHERE id=?`;
@@ -287,7 +353,13 @@ function addResourceRoutes(resource, definition) {
     try {
       const [result] = await pool.query(query, values);
 
-      if (result.affectedRows === 0) {
+      let updatedRecord;
+      if (definition.selectById) {
+        const [rows] = await pool.query(definition.selectById, [recordId]);
+        updatedRecord = rows[0];
+      }
+
+      if (definition.selectById ? !updatedRecord : result.affectedRows === 0) {
         return res.status(404).json({ success: false, message: `${resource} record not found` });
       }
 
@@ -298,7 +370,9 @@ function addResourceRoutes(resource, definition) {
         resource,
         { recordId, fields: req.body },
       );
-      res.status(200).json({ success: true, message: `${resource} record updated`, id: recordId });
+      res.status(200).json(
+        updatedRecord || { success: true, message: `${resource} record updated`, id: recordId },
+      );
     } catch (error) {
       console.error(`Failed to update ${resource}:`, error.message);
       res.status(500).json({ error: error.message });
